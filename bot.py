@@ -5,21 +5,31 @@ from googletrans import Translator
 
 # Environment variables for configuration
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")  # Your channel or chat ID
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")  # Your channel or chat ID    
 NEWSAPI_KEY = os.environ.get("NEWSAPI_KEY")
 
 if not all([TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, NEWSAPI_KEY]):
     raise ValueError("Missing required environment variables. Please set TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, and NEWSAPI_KEY")
 
 # Format chat ID properly for public channels
-if TELEGRAM_CHAT_ID.startswith('@'):
-    # If it's a channel username, we need to get the channel ID first
-    print("Please use channel ID instead of channel username. Channel ID should start with -100 for public channels.")
-    raise ValueError("Invalid TELEGRAM_CHAT_ID format. Please use channel ID instead of channel username.")
-elif not TELEGRAM_CHAT_ID.startswith('-100') and TELEGRAM_CHAT_ID.startswith('-'):
-    TELEGRAM_CHAT_ID = f"-100{TELEGRAM_CHAT_ID[1:]}"
-elif not TELEGRAM_CHAT_ID.startswith('-'):
-    TELEGRAM_CHAT_ID = f"-100{TELEGRAM_CHAT_ID}"
+if TELEGRAM_CHAT_ID.startswith('@'):    
+    print("\nError: Channel username format is not supported.\nTo get the correct channel ID:\n1. Forward a message from your channel to @userinfobot\n2. Look for 'Forwarded from chat #<number>' in the response\n3. Use that number (including the minus sign) as your TELEGRAM_CHAT_ID\n4. Ensure the bot is added as an administrator to the channel with posting permissions\n")
+    raise ValueError("Invalid TELEGRAM_CHAT_ID format. Please use numeric channel ID instead of channel username.")
+
+# Ensure proper format for channel ID
+try:
+    # Convert to integer to validate format
+    int(TELEGRAM_CHAT_ID)
+    # Add -100 prefix if needed for public channels
+    if not TELEGRAM_CHAT_ID.startswith('-100'):
+        if TELEGRAM_CHAT_ID.startswith('-'):
+            TELEGRAM_CHAT_ID = f"-100{TELEGRAM_CHAT_ID[1:]}"
+        else:
+            TELEGRAM_CHAT_ID = f"-100{TELEGRAM_CHAT_ID}"
+    print(f"\nUsing channel ID: {TELEGRAM_CHAT_ID}")
+    print("Important: Please verify the following:\n1. The bot has been added to the channel\n2. The bot has been promoted to administrator\n3. The bot has 'Post Messages' permission enabled\n")
+except ValueError:
+    raise ValueError("Invalid TELEGRAM_CHAT_ID format. Channel ID must be a numeric value.")
 
 bot = Bot(token=TELEGRAM_TOKEN)
 translator = Translator()
@@ -47,53 +57,141 @@ def fetch_nasdaq_news():
 def format_news(article):
     """
     Format a single news article:
-      - Use the title as the topic (first sentence).
-      - Create a summary (limit total to 10 sentences). For simplicity,
-        we use title and description split into sentences.
+      - First line: Source name
+      - Following lines: Sentences prefixed with dash (-)
+      - Articles must have 10-15 sentences
     """
     from nltk.tokenize import sent_tokenize
-    # Ensure you have nltk sentence tokenizer data downloaded:
-    # In your setup, run: python -m nltk.downloader punkt
-
-    title = article.get("title", "No Title")
-    description = article.get("description", "")
-    content = f"{title}. {description}"
-    sentences = sent_tokenize(content)
-    # Limit to 10 sentences maximum
-    sentences = sentences[:10]
-    # First sentence is treated as the topic title
-    topic = sentences[0]
-    summary = " ".join(sentences[1:]) if len(sentences) > 1 else ""
-    return topic, summary
+    
+    # Extract article components with better validation
+    source = article.get("source", {})
+    if not isinstance(source, dict):
+        print("Invalid source format")
+        return None
+    source_name = source.get("name", "Unknown Source")
+    
+    title = article.get("title", "").strip()
+    if not title:
+        print("Article missing title")
+        return None
+    
+    description = article.get("description", "").strip()
+    content = article.get("content", "").strip()
+    
+    # Ensure we have at least some content
+    if not (description or content):
+        print("Article missing both description and content")
+        return None
+    
+    # Clean and combine content, handling truncated text
+    content = content.split('[+')[0] if '[+' in content else content  # Remove truncation marker
+    content = content.rstrip('...').rstrip('…')  # Remove trailing ellipsis
+    full_content = f"{title}. {description}. {content}"
+    
+    try:
+        # Get all sentences
+        sentences = sent_tokenize(full_content)
+        
+        # Remove duplicates while preserving order
+        unique_sentences = []
+        seen = set()
+        for sentence in sentences:
+            # Clean and normalize the sentence
+            cleaned = sentence.strip()
+            if not cleaned or len(cleaned) < 10:  # Skip very short sentences
+                continue
+            if any(char in cleaned for char in ['[', ']', '{', '}', '|']):  # Skip likely formatting artifacts
+                continue
+            normalized = cleaned.lower()
+            if normalized not in seen:
+                seen.add(normalized)
+                unique_sentences.append(cleaned)
+        
+        # Check if we have enough sentences
+        if len(unique_sentences) < 3:  # Reduced from 10 to 3 minimum sentences
+            print(f"Not enough valid sentences: {len(unique_sentences)} found, 3 required")
+            return None
+        
+        # Take first 15 complete sentences if we have more
+        formatted_sentences = []
+        for sentence in unique_sentences:
+            # Only add sentences that end with proper punctuation
+            if sentence[-1] in ['.', '!', '?']:
+                formatted_sentences.append(sentence)
+            if len(formatted_sentences) >= 15:
+                break
+        
+        # Format the message with source link, headline, and summary
+        message = f"{source_name}: {title}\n\n"
+        message += "\n".join(f"– {sentence}" for sentence in formatted_sentences)
+        
+        # Validate final message
+        if not message or len(message.strip()) < 50:  # Ensure minimum content length
+            print("Generated message too short")
+            return None
+            
+        return message
+        
+    except Exception as e:
+        print(f"Error formatting news: {str(e)}")
+        return None
 
 def translate_to_russian(text):
     """
     Translate the provided text to Russian.
+    Returns None if translation fails to indicate error.
     """
+    if not text or not isinstance(text, str):
+        print("Translation error: Invalid input text")
+        return None
+    
     try:
         translation = translator.translate(text, dest='ru')
-        return translation.text
+        if translation and translation.text:
+            return translation.text
+        print("Translation error: Empty translation result")
+        return None
     except Exception as e:
-        print("Translation error:", e)
-        return text
+        print(f"Translation error: {str(e)}")
+        return None
 
 def send_news():
+    import time
     articles = fetch_nasdaq_news()
     if not articles:
         print("No articles fetched.")
         return
 
-    for article in articles:
-        topic, summary = format_news(article)
-        # Translate both topic and summary to Russian
-        topic_ru = translate_to_russian(topic)
-        summary_ru = translate_to_russian(summary)
-        message = f"*{topic_ru}*\n{summary_ru}"
+    sent_count = 0
+    for i, article in enumerate(articles):
         try:
-            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode='Markdown')
-            print("Sent message:", topic_ru)
+            # Format the news article
+            message = format_news(article)
+            if not message:
+                print(f"Skipping article {i+1}: Could not format message")
+                continue
+
+            # Translate to Russian
+            message_ru = translate_to_russian(message)
+            if not message_ru:
+                print(f"Skipping article {i+1}: Translation failed")
+                continue
+
+            # Send message
+            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message_ru)
+            sent_count += 1
+            print(f"Sent message {sent_count} successfully")
+
+            # Sleep between messages
+            if i < len(articles) - 1:
+                print("Waiting 30 seconds before sending next article...")
+                time.sleep(30)
+
         except Exception as e:
-            print("Error sending message:", e)
+            print(f"Error processing article {i+1}: {str(e)}")
+            continue
+
+    print(f"Finished sending news. Successfully sent {sent_count} articles.")
 
 if __name__ == "__main__":
     send_news()
