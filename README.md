@@ -1,3 +1,18 @@
 # nasdaq-telegram-bot
+## Install
+```
+pip install -r requirements.txt
+'''
+## Run
+``` 
+python main.py
+'''
 
- docker run -e TELEGRAM_TOKEN=7972328495:AAEXuAPpvfS-NuLexfaFDDKri9mu3NDCH84 -e TELEGRAM_CHAT_ID=2324085446 -e NEWSAPI_KEY=0b7a68a2c83c49ffbf5ef64e646f38ac nasdaq-telegram-bot
+## Docker Build
+'''
+docker build -t nasdaq-telegram-bot .
+'''
+
+## Docker Run
+'''
+docker run -d -e TELEGRAM_TOKEN=<TOKEN> -e TELEGRAM_CHAT_ID=<CHAT_ID> nasdaq-telegram-bot
