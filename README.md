@@ -2,16 +2,14 @@
 ## Install
 ```
 pip install -r requirements.txt
-'''
+
 ## Run
-``` 
+```
 python main.py
-'''
 
 ## Docker Build
 '''
 docker build -t nasdaq-telegram-bot .
-'''
 
 ## Docker Run
 '''
