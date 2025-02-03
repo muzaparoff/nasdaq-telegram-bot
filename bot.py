@@ -57,9 +57,9 @@ def fetch_nasdaq_news():
 def format_news(article):
     """
     Format a single news article:
-      - First line: Source name
-      - Following lines: Sentences prefixed with dash (-)
-      - Articles must have 10-15 sentences
+      - First line: Source name with bold headline
+      - Following lines: Unique sentences prefixed with dash (-)
+      - Maximum 15 sentences, no minimum requirement
     """
     from nltk.tokenize import sent_tokenize
     
@@ -83,10 +83,20 @@ def format_news(article):
         print("Article missing both description and content")
         return None
     
-    # Clean and combine content, handling truncated text
-    content = content.split('[+')[0] if '[+' in content else content  # Remove truncation marker
-    content = content.rstrip('...').rstrip('…')  # Remove trailing ellipsis
-    full_content = f"{title}. {description}. {content}"
+    # Clean and combine content more effectively
+    content_parts = []
+    if description:
+        content_parts.append(description.strip())
+    if content:
+        # Remove common truncation markers and clean content
+        cleaned_content = content.split('[+')[0].split('…')[0].split('...')[0].strip()
+        if cleaned_content:
+            content_parts.append(cleaned_content)
+    
+    # Combine all parts with proper sentence separation
+    full_content = ". ".join(content_parts)
+    if not full_content.endswith(('.', '!', '?')):
+        full_content += "."
     
     try:
         # Get all sentences
@@ -98,32 +108,47 @@ def format_news(article):
         for sentence in sentences:
             # Clean and normalize the sentence
             cleaned = sentence.strip()
-            if not cleaned or len(cleaned) < 10:  # Skip very short sentences
+            if not cleaned:
                 continue
-            if any(char in cleaned for char in ['[', ']', '{', '}', '|']):  # Skip likely formatting artifacts
+            # Allow shorter sentences but still filter out very short ones
+            if len(cleaned) < 5:  # Reduced from 10
+                continue
+            # More permissive filtering of formatting artifacts
+            if '[' in cleaned and ']' in cleaned:  # Only filter obvious markdown links
                 continue
             normalized = cleaned.lower()
             if normalized not in seen:
                 seen.add(normalized)
                 unique_sentences.append(cleaned)
         
-        # Check if we have enough sentences
-        if len(unique_sentences) < 3:  # Reduced from 10 to 3 minimum sentences
-            print(f"Not enough valid sentences: {len(unique_sentences)} found, 3 required")
-            return None
-        
-        # Take first 15 complete sentences if we have more
+        # Take up to 15 complete sentences, excluding those too similar to title
         formatted_sentences = []
+        title_lower = title.lower()
+        
         for sentence in unique_sentences:
-            # Only add sentences that end with proper punctuation
-            if sentence[-1] in ['.', '!', '?']:
+            # Skip sentences that are too similar to the title
+            if sentence.lower() == title_lower or \
+               (len(sentence) >= 20 and title_lower in sentence.lower()):  # Increased length threshold and removed reverse check
+                continue
+                
+            # Accept sentences with more types of ending punctuation
+            if sentence[-1] in ['.', '!', '?', ':', ';'] or len(sentence) >= 30:  # Allow longer sentences without strict punctuation
                 formatted_sentences.append(sentence)
             if len(formatted_sentences) >= 15:
                 break
         
-        # Format the message with source link, headline, and summary
+        # Format the message with source name and headline (without markdown)
         message = f"{source_name}: {title}\n\n"
-        message += "\n".join(f"– {sentence}" for sentence in formatted_sentences)
+        # Only proceed if we have between 3 and 15 sentences (reduced from 5)
+        if len(formatted_sentences) < 3:
+            print("Not enough unique sentences (minimum 3 required)")
+            return None
+            
+        # Add all sentences with line breaks between them (up to 15)
+        for i, sentence in enumerate(formatted_sentences[:15]):
+            message += f"– {sentence}\n"
+        # Add channel name with @ symbol after a blank line
+        message += "\n\n@nasdaq_news"
         
         # Validate final message
         if not message or len(message.strip()) < 50:  # Ensure minimum content length
