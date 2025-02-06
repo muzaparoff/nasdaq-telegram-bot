@@ -43,9 +43,9 @@ jobs:
             docker stop nasdaq-telegram-bot || true
             docker rm nasdaq-telegram-bot || true
             # Run the new container in detached mode
-            # docker run -d --restart unless-stopped --name nasdaq-telegram-bot muzaparoff/nasdaq-telegram-bot:latest
-            docker run -e TELEGRAM_TOKEN=${{ secrets.TELEGRAM_TOKEN }} \
+            docker run -d --restart unless-stopped --name nasdaq-telegram-bot \
+                      -e TELEGRAM_TOKEN=${{ secrets.TELEGRAM_TOKEN }} \
                       -e TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }} \
-                      -e NEWSAPI_KEY=${{ secrets.NEWSAPI_KEY }}
-                      nasdaq-telegram-bot
+                      -e NEWSAPI_KEY=${{ secrets.NEWSAPI_KEY }} \
+                      muzaparoff/nasdaq-telegram-bot:latest
             
