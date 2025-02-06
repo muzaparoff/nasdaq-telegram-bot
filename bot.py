@@ -34,25 +34,50 @@ except ValueError:
 bot = Bot(token=TELEGRAM_TOKEN)
 translator = Translator()
 
+# List of major S&P 500 companies to track
+TRACKED_COMPANIES = [
+    # Technology
+    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'AVGO', 'CSCO', 'ADBE', 'CRM',
+    # Finance
+    'BRK-B', 'JPM', 'V', 'MA', 'BAC', 'WFC', 'GS', 'MS', 'BLK', 'C',
+    # Healthcare
+    'UNH', 'JNJ', 'LLY', 'PFE', 'MRK', 'ABT', 'TMO', 'DHR', 'BMY', 'ABBV',
+    # Consumer
+    'PG', 'KO', 'PEP', 'COST', 'WMT', 'MCD', 'DIS', 'HD', 'NKE', 'SBUX',
+    # Energy
+    'XOM', 'CVX', 'COP', 'SLB', 'EOG'
+]
+
 def fetch_nasdaq_news():
     """
-    Fetches recent Nasdaq-related news using NewsAPI.org.
+    Fetches recent news for S&P 500 companies using NewsAPI.org.
     You need to sign up at https://newsapi.org for an API key.
     """
     url = "https://newsapi.org/v2/everything"
-    params = {
-        "q": "NASDAQ",  # search term
-        "sortBy": "publishedAt",
-        "language": "en",
-        "apiKey": NEWSAPI_KEY
-    }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        articles = response.json().get("articles", [])
-        return articles
-    else:
-        print("Error fetching news:", response.text)
-        return []
+    
+    # Split companies into groups to avoid URL length limits
+    group_size = 10
+    articles = []
+    
+    for i in range(0, len(TRACKED_COMPANIES), group_size):
+        company_group = TRACKED_COMPANIES[i:i + group_size]
+        company_query = ' OR '.join([f'({company} OR "{company} stock")' for company in company_group])
+        
+        params = {
+            "q": f"({company_query}) AND (S&P 500 OR stock OR market OR trading)",
+            "sortBy": "publishedAt",
+            "language": "en",
+            "apiKey": NEWSAPI_KEY
+        }
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            articles.extend(response.json().get("articles", []))
+        else:
+            print(f"Error fetching news for group {i//group_size + 1}:", response.text)
+    
+    # Sort articles by published date and return most recent
+    articles.sort(key=lambda x: x.get('publishedAt', ''), reverse=True)
+    return articles[:50]  # Limit to 50 most recent articles
 
 def format_news(article):
     """
