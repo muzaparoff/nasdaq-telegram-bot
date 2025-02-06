@@ -44,3 +44,4 @@ jobs:
             docker rm nasdaq-telegram-bot || true
             # Run the new container in detached mode
             docker run -d --restart unless-stopped --name nasdaq-telegram-bot muzaparoff/nasdaq-telegram-bot:latest
+            
