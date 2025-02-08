@@ -55,6 +55,14 @@ def fetch_nasdaq_news():
     """
     url = "https://newsapi.org/v2/everything"
     
+    # Define trusted financial news sources
+    financial_sources = [
+        'Bloomberg', 'Reuters', 'CNBC', 'Financial Times', 'Wall Street Journal',
+        'MarketWatch', 'Seeking Alpha', 'The Motley Fool', 'Yahoo Finance', 'Investing.com',
+        'Barron\'s', 'Business Insider', 'Forbes', 'TheStreet', 'Benzinga'
+    ]
+    sources_query = ' OR '.join([f'source:"{source}"' for source in financial_sources])
+    
     # Split companies into groups to avoid URL length limits
     group_size = 10
     articles = []
@@ -64,7 +72,7 @@ def fetch_nasdaq_news():
         company_query = ' OR '.join([f'({company} OR "{company} stock")' for company in company_group])
         
         params = {
-            "q": f"({company_query}) AND (S&P 500 OR stock OR market OR trading)",
+            "q": f"({company_query}) AND (stock OR shares OR market OR trading OR investor OR earnings OR revenue OR dividend OR NYSE OR NASDAQ) AND ({sources_query})",
             "sortBy": "publishedAt",
             "language": "en",
             "apiKey": NEWSAPI_KEY
