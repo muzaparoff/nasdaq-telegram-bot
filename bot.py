@@ -62,14 +62,23 @@ def fetch_yahoo_finance_news():
             news = stock.news
             if news:
                 for item in news:
+                    # Extract and validate content
+                    summary = item.get("summary", "")
+                    if not summary:
+                        continue
+                        
+                    # Create article with validated content
                     article = {
                         "source": {"name": "Yahoo Finance"},
-                        "title": item.get("title", ""),
-                        "description": item.get("summary", ""),
-                        "content": item.get("summary", ""),  # Yahoo Finance provides summary instead of full content
+                        "title": item.get("title", "").strip(),
+                        "description": summary.strip(),
+                        "content": summary.strip(),  # Yahoo Finance provides summary as content
                         "publishedAt": item.get("providerPublishTime", "")
                     }
-                    articles.append(article)
+                    
+                    # Only append if we have essential content
+                    if article["title"] and (article["description"] or article["content"]):
+                        articles.append(article)
         except Exception as e:
             print(f"Error fetching Yahoo Finance data for {symbol}: {str(e)}")
             continue
@@ -105,11 +114,30 @@ def fetch_nasdaq_news():
             "language": "en",
             "apiKey": NEWSAPI_KEY
         }
-        response = requests.get(url, params=params)
-        if response.status_code == 200:
-            articles.extend(response.json().get("articles", []))
-        else:
-            print(f"Error fetching news for group {i//group_size + 1}:", response.text)
+        try:
+            response = requests.get(url, params=params)
+            if response.status_code == 200:
+                newsapi_articles = response.json().get("articles", [])
+                # Filter and clean articles
+                for article in newsapi_articles:
+                    # Clean and validate content
+                    title = article.get("title", "").strip()
+                    description = article.get("description", "").strip()
+                    content = article.get("content", "").strip()
+                    
+                    # Only add articles with sufficient content
+                    if title and (description or content):
+                        articles.append({
+                            "source": article.get("source", {"name": "Unknown Source"}),
+                            "title": title,
+                            "description": description,
+                            "content": content,
+                            "publishedAt": article.get("publishedAt", "")
+                        })
+            else:
+                print(f"Error fetching news for group {i//group_size + 1}:", response.text)
+        except Exception as e:
+            print(f"Error in NewsAPI request: {str(e)}")
     
     # Fetch news from Yahoo Finance
     yahoo_articles = fetch_yahoo_finance_news()
@@ -175,14 +203,16 @@ def format_news(article):
             cleaned = sentence.strip()
             if not cleaned:
                 continue
-            # Allow shorter sentences but still filter out very short ones
-            if len(cleaned) < 5:  # Reduced from 10
+            # Allow sentences of reasonable length
+            if len(cleaned) < 20:  # Increased minimum length for more meaningful content
                 continue
-            # More permissive filtering of formatting artifacts
-            if '[' in cleaned and ']' in cleaned:  # Only filter obvious markdown links
+            # Filter out common formatting artifacts and unwanted patterns
+            if any(marker in cleaned for marker in ['[', ']', '{', '}', '<', '>', '|']):
+                continue
+            if cleaned.startswith(('http', 'www', '//', '@')):
                 continue
             normalized = cleaned.lower()
-            if normalized not in seen:
+            if normalized not in seen and not any(word in normalized for word in ['subscribe', 'click here', 'read more']):
                 seen.add(normalized)
                 unique_sentences.append(cleaned)
         
