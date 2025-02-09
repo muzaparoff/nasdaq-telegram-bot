@@ -1,5 +1,6 @@
 import os
 import requests
+import yfinance as yf
 from telegram import Bot
 from googletrans import Translator
 
@@ -48,9 +49,35 @@ TRACKED_COMPANIES = [
     'XOM', 'CVX', 'COP', 'SLB', 'EOG'
 ]
 
+def fetch_yahoo_finance_news():
+    """
+    Fetches news and stock data from Yahoo Finance for tracked companies.
+    """
+    articles = []
+    for symbol in TRACKED_COMPANIES:
+        try:
+            # Get stock info
+            stock = yf.Ticker(symbol)
+            # Get news
+            news = stock.news
+            if news:
+                for item in news:
+                    article = {
+                        "source": {"name": "Yahoo Finance"},
+                        "title": item.get("title", ""),
+                        "description": item.get("summary", ""),
+                        "content": item.get("summary", ""),  # Yahoo Finance provides summary instead of full content
+                        "publishedAt": item.get("providerPublishTime", "")
+                    }
+                    articles.append(article)
+        except Exception as e:
+            print(f"Error fetching Yahoo Finance data for {symbol}: {str(e)}")
+            continue
+    return articles
+
 def fetch_nasdaq_news():
     """
-    Fetches recent news for S&P 500 companies using NewsAPI.org.
+    Fetches recent news for S&P 500 companies using NewsAPI.org and Yahoo Finance.
     You need to sign up at https://newsapi.org for an API key.
     """
     url = "https://newsapi.org/v2/everything"
@@ -67,6 +94,7 @@ def fetch_nasdaq_news():
     group_size = 10
     articles = []
     
+    # Fetch news from NewsAPI
     for i in range(0, len(TRACKED_COMPANIES), group_size):
         company_group = TRACKED_COMPANIES[i:i + group_size]
         company_query = ' OR '.join([f'({company} OR "{company} stock")' for company in company_group])
@@ -83,7 +111,11 @@ def fetch_nasdaq_news():
         else:
             print(f"Error fetching news for group {i//group_size + 1}:", response.text)
     
-    # Sort articles by published date and return most recent
+    # Fetch news from Yahoo Finance
+    yahoo_articles = fetch_yahoo_finance_news()
+    articles.extend(yahoo_articles)
+    
+    # Sort all articles by published date and return most recent
     articles.sort(key=lambda x: x.get('publishedAt', ''), reverse=True)
     return articles[:50]  # Limit to 50 most recent articles
 

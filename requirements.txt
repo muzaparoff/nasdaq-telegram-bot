@@ -2,3 +2,4 @@ python-telegram-bot==13.15
 requests
 googletrans==4.0.0rc1
 nltk
+yfinance==0.2.31
