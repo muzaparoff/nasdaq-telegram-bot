@@ -87,8 +87,11 @@ def fetch_yahoo_finance_news():
 def fetch_nasdaq_news():
     """
     Fetches recent news for S&P 500 companies using NewsAPI.org and Yahoo Finance.
-    You need to sign up at https://newsapi.org for an API key.
+    Falls back to Yahoo Finance if NewsAPI is rate limited.
     """
+    articles = []
+    
+    # Try NewsAPI first with a single, optimized query
     url = "https://newsapi.org/v2/everything"
     
     # Define trusted financial news sources
@@ -99,47 +102,44 @@ def fetch_nasdaq_news():
     ]
     sources_query = ' OR '.join([f'source:"{source}"' for source in financial_sources])
     
-    # Split companies into groups to avoid URL length limits
-    group_size = 10
-    articles = []
+    # Create a single query for all companies
+    company_query = ' OR '.join([f'({company} OR "{company} stock")' for company in TRACKED_COMPANIES[:20]])
     
-    # Fetch news from NewsAPI
-    for i in range(0, len(TRACKED_COMPANIES), group_size):
-        company_group = TRACKED_COMPANIES[i:i + group_size]
-        company_query = ' OR '.join([f'({company} OR "{company} stock")' for company in company_group])
-        
-        params = {
-            "q": f"({company_query}) AND (stock OR shares OR market OR trading OR investor OR earnings OR revenue OR dividend OR NYSE OR NASDAQ) AND ({sources_query})",
-            "sortBy": "publishedAt",
-            "language": "en",
-            "apiKey": NEWSAPI_KEY
-        }
-        try:
-            response = requests.get(url, params=params)
-            if response.status_code == 200:
-                newsapi_articles = response.json().get("articles", [])
-                # Filter and clean articles
-                for article in newsapi_articles:
-                    # Clean and validate content
-                    title = article.get("title", "").strip()
-                    description = article.get("description", "").strip()
-                    content = article.get("content", "").strip()
-                    
-                    # Only add articles with sufficient content
-                    if title and (description or content):
-                        articles.append({
-                            "source": article.get("source", {"name": "Unknown Source"}),
-                            "title": title,
-                            "description": description,
-                            "content": content,
-                            "publishedAt": article.get("publishedAt", "")
-                        })
-            else:
-                print(f"Error fetching news for group {i//group_size + 1}:", response.text)
-        except Exception as e:
-            print(f"Error in NewsAPI request: {str(e)}")
+    params = {
+        "q": f"({company_query}) AND (stock OR shares OR market OR trading OR investor OR earnings OR revenue OR dividend OR NYSE OR NASDAQ) AND ({sources_query})",
+        "sortBy": "publishedAt",
+        "language": "en",
+        "apiKey": NEWSAPI_KEY
+    }
     
-    # Fetch news from Yahoo Finance
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            newsapi_articles = response.json().get("articles", [])
+            # Filter and clean articles
+            for article in newsapi_articles:
+                # Clean and validate content
+                title = article.get("title", "").strip()
+                description = article.get("description", "").strip()
+                content = article.get("content", "").strip()
+                
+                # Only add articles with sufficient content
+                if title and (description or content):
+                    articles.append({
+                        "source": article.get("source", {"name": "Unknown Source"}),
+                        "title": title,
+                        "description": description,
+                        "content": content,
+                        "publishedAt": article.get("publishedAt", "")
+                    })
+        elif response.status_code == 429:  # Rate limit error
+            print("NewsAPI rate limit reached, falling back to Yahoo Finance only")
+        else:
+            print(f"Error fetching news from NewsAPI: {response.text}")
+    except Exception as e:
+        print(f"Error in NewsAPI request: {str(e)}")
+    
+    # Always fetch from Yahoo Finance as backup/additional source
     yahoo_articles = fetch_yahoo_finance_news()
     articles.extend(yahoo_articles)
     
