@@ -110,7 +110,7 @@ def fetch_yahoo_finance_news():
 def fetch_nasdaq_news():
     """
     Fetches recent news for S&P 500 companies using NewsAPI.org and Yahoo Finance.
-    Implements rate limiting and retry logic.
+    Implements enhanced rate limiting and retry logic.
     """
     articles = []
     url = "https://newsapi.org/v2/everything"
@@ -123,66 +123,68 @@ def fetch_nasdaq_news():
     ]
     sources_query = ' OR '.join([f'source:"{source}"' for source in financial_sources])
     
-    # Create a single query for all companies
-    company_query = ' OR '.join([f'({company} OR "{company} stock")' for company in TRACKED_COMPANIES[:20]])
+    # Split companies into smaller batches to reduce query complexity
+    batch_size = 5
+    max_retries = 5
+    base_delay = 10  # Initial delay in seconds
     
-    params = {
-        "q": f"({company_query}) AND (stock OR shares OR market OR trading OR investor OR earnings OR revenue OR dividend OR NYSE OR NASDAQ) AND ({sources_query})",
-        "sortBy": "publishedAt",
-        "language": "en",
-        "apiKey": NEWSAPI_KEY
-    }
-    
-    try:
-        # Use session with retry strategy
-        response = session.get(url, params=params, timeout=30)
-        if response.status_code == 200:
-            newsapi_articles = response.json().get("articles", [])
-            for article in newsapi_articles:
-                title = article.get("title", "").strip()
-                description = article.get("description", "").strip()
-                content = article.get("content", "").strip()
+    for i in range(0, len(TRACKED_COMPANIES), batch_size):
+        company_batch = TRACKED_COMPANIES[i:i + batch_size]
+        company_query = ' OR '.join([f'({company} OR "{company} stock")' for company in company_batch])
+        
+        params = {
+            "q": f"({company_query}) AND (stock OR shares OR market OR trading OR investor OR earnings OR revenue OR dividend OR NYSE OR NASDAQ) AND ({sources_query})",
+            "sortBy": "publishedAt",
+            "language": "en",
+            "apiKey": NEWSAPI_KEY
+        }
+        
+        retries = 0
+        while retries < max_retries:
+            try:
+                # Use session with retry strategy
+                response = session.get(url, params=params, timeout=30)
                 
-                if title and (description or content):
-                    articles.append({
-                        "source": article.get("source", {"name": "Unknown Source"}),
-                        "title": title,
-                        "description": description,
-                        "content": content,
-                        "publishedAt": article.get("publishedAt", "")
-                    })
-        elif response.status_code == 429:
-            print("NewsAPI rate limit reached, waiting before retrying...")
-            # Get retry-after header or use default
-            retry_after = int(response.headers.get('Retry-After', 60))
-            print(f"Waiting {retry_after} seconds before retrying...")
-            time.sleep(retry_after)
-            # Try one more time after waiting
-            response = session.get(url, params=params, timeout=30)
-            if response.status_code == 200:
-                newsapi_articles = response.json().get("articles", [])
-                # Process articles as before
-                for article in newsapi_articles:
-                    title = article.get("title", "").strip()
-                    description = article.get("description", "").strip()
-                    content = article.get("content", "").strip()
+                if response.status_code == 200:
+                    newsapi_articles = response.json().get("articles", [])
+                    for article in newsapi_articles:
+                        title = article.get("title", "").strip()
+                        description = article.get("description", "").strip()
+                        content = article.get("content", "").strip()
+                        
+                        if title and (description or content):
+                            articles.append({
+                                "source": article.get("source", {"name": "Unknown Source"}),
+                                "title": title,
+                                "description": description,
+                                "content": content,
+                                "publishedAt": article.get("publishedAt", "")
+                            })
+                    break  # Success, move to next batch
                     
-                    if title and (description or content):
-                        articles.append({
-                            "source": article.get("source", {"name": "Unknown Source"}),
-                            "title": title,
-                            "description": description,
-                            "content": content,
-                            "publishedAt": article.get("publishedAt", "")
-                        })
-            else:
-                print(f"Error fetching news from NewsAPI after retry: {response.text}")
-        else:
-            print(f"Error fetching news from NewsAPI: {response.text}")
-    except requests.exceptions.RequestException as e:
-        print(f"Network error in NewsAPI request: {str(e)}")
-    except Exception as e:
-        print(f"Unexpected error in NewsAPI request: {str(e)}")
+                elif response.status_code == 429:
+                    retry_after = int(response.headers.get('Retry-After', base_delay * (2 ** retries)))
+                    print(f"NewsAPI rate limit reached, waiting {retry_after} seconds...")
+                    time.sleep(retry_after)
+                else:
+                    print(f"Error fetching news from NewsAPI: {response.text}")
+                    time.sleep(base_delay * (2 ** retries))
+                    
+            except requests.exceptions.RequestException as e:
+                print(f"Network error in NewsAPI request: {str(e)}")
+                time.sleep(base_delay * (2 ** retries))
+                
+            except Exception as e:
+                print(f"Unexpected error in NewsAPI request: {str(e)}")
+                time.sleep(base_delay * (2 ** retries))
+                
+            retries += 1
+            if retries == max_retries:
+                print(f"Failed to fetch news for batch after {max_retries} attempts")
+        
+        # Add delay between batches to avoid rate limits
+        if i + batch_size < len(TRACKED_COMPANIES):
+            time.sleep(2)
     
     # Always fetch from Yahoo Finance as backup/additional source
     yahoo_articles = fetch_yahoo_finance_news()
