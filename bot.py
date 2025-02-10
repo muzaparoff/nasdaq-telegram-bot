@@ -1,8 +1,11 @@
 import os
+import time
 import requests
 import yfinance as yf
 from telegram import Bot
 from googletrans import Translator
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Environment variables for configuration
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -49,49 +52,67 @@ TRACKED_COMPANIES = [
     'XOM', 'CVX', 'COP', 'SLB', 'EOG'
 ]
 
+# Configure retry strategy for requests
+retry_strategy = Retry(
+    total=3,  # number of retries
+    backoff_factor=1,  # wait 1, 2, 4 seconds between retries
+    status_forcelist=[429, 500, 502, 503, 504]  # HTTP status codes to retry on
+)
+http_adapter = HTTPAdapter(max_retries=retry_strategy)
+session = requests.Session()
+session.mount('http://', http_adapter)
+session.mount('https://', http_adapter)
+
 def fetch_yahoo_finance_news():
     """
     Fetches news and stock data from Yahoo Finance for tracked companies.
+    Implements retry logic and better error handling.
     """
     articles = []
+    retry_delay = 5  # Initial retry delay in seconds
+    max_retries = 3
+    
     for symbol in TRACKED_COMPANIES:
-        try:
-            # Get stock info
-            stock = yf.Ticker(symbol)
-            # Get news
-            news = stock.news
-            if news:
-                for item in news:
-                    # Extract and validate content
-                    summary = item.get("summary", "")
-                    if not summary:
-                        continue
+        retries = 0
+        while retries < max_retries:
+            try:
+                # Get stock info with timeout
+                stock = yf.Ticker(symbol)
+                news = stock.news
+                if news:
+                    for item in news:
+                        summary = item.get("summary", "")
+                        if not summary:
+                            continue
+                            
+                        article = {
+                            "source": {"name": "Yahoo Finance"},
+                            "title": item.get("title", "").strip(),
+                            "description": summary.strip(),
+                            "content": summary.strip(),
+                            "publishedAt": item.get("providerPublishTime", "")
+                        }
                         
-                    # Create article with validated content
-                    article = {
-                        "source": {"name": "Yahoo Finance"},
-                        "title": item.get("title", "").strip(),
-                        "description": summary.strip(),
-                        "content": summary.strip(),  # Yahoo Finance provides summary as content
-                        "publishedAt": item.get("providerPublishTime", "")
-                    }
-                    
-                    # Only append if we have essential content
-                    if article["title"] and (article["description"] or article["content"]):
-                        articles.append(article)
-        except Exception as e:
-            print(f"Error fetching Yahoo Finance data for {symbol}: {str(e)}")
-            continue
+                        if article["title"] and (article["description"] or article["content"]):
+                            articles.append(article)
+                break  # Success, exit retry loop
+                
+            except Exception as e:
+                retries += 1
+                if retries < max_retries:
+                    print(f"Attempt {retries}/{max_retries} failed for {symbol}. Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    print(f"Failed to fetch Yahoo Finance data for {symbol} after {max_retries} attempts: {str(e)}")
     return articles
 
 def fetch_nasdaq_news():
     """
     Fetches recent news for S&P 500 companies using NewsAPI.org and Yahoo Finance.
-    Falls back to Yahoo Finance if NewsAPI is rate limited.
+    Implements rate limiting and retry logic.
     """
     articles = []
-    
-    # Try NewsAPI first with a single, optimized query
     url = "https://newsapi.org/v2/everything"
     
     # Define trusted financial news sources
@@ -113,17 +134,15 @@ def fetch_nasdaq_news():
     }
     
     try:
-        response = requests.get(url, params=params)
+        # Use session with retry strategy
+        response = session.get(url, params=params, timeout=30)
         if response.status_code == 200:
             newsapi_articles = response.json().get("articles", [])
-            # Filter and clean articles
             for article in newsapi_articles:
-                # Clean and validate content
                 title = article.get("title", "").strip()
                 description = article.get("description", "").strip()
                 content = article.get("content", "").strip()
                 
-                # Only add articles with sufficient content
                 if title and (description or content):
                     articles.append({
                         "source": article.get("source", {"name": "Unknown Source"}),
@@ -132,12 +151,38 @@ def fetch_nasdaq_news():
                         "content": content,
                         "publishedAt": article.get("publishedAt", "")
                     })
-        elif response.status_code == 429:  # Rate limit error
-            print("NewsAPI rate limit reached, falling back to Yahoo Finance only")
+        elif response.status_code == 429:
+            print("NewsAPI rate limit reached, waiting before retrying...")
+            # Get retry-after header or use default
+            retry_after = int(response.headers.get('Retry-After', 60))
+            print(f"Waiting {retry_after} seconds before retrying...")
+            time.sleep(retry_after)
+            # Try one more time after waiting
+            response = session.get(url, params=params, timeout=30)
+            if response.status_code == 200:
+                newsapi_articles = response.json().get("articles", [])
+                # Process articles as before
+                for article in newsapi_articles:
+                    title = article.get("title", "").strip()
+                    description = article.get("description", "").strip()
+                    content = article.get("content", "").strip()
+                    
+                    if title and (description or content):
+                        articles.append({
+                            "source": article.get("source", {"name": "Unknown Source"}),
+                            "title": title,
+                            "description": description,
+                            "content": content,
+                            "publishedAt": article.get("publishedAt", "")
+                        })
+            else:
+                print(f"Error fetching news from NewsAPI after retry: {response.text}")
         else:
             print(f"Error fetching news from NewsAPI: {response.text}")
+    except requests.exceptions.RequestException as e:
+        print(f"Network error in NewsAPI request: {str(e)}")
     except Exception as e:
-        print(f"Error in NewsAPI request: {str(e)}")
+        print(f"Unexpected error in NewsAPI request: {str(e)}")
     
     # Always fetch from Yahoo Finance as backup/additional source
     yahoo_articles = fetch_yahoo_finance_news()
