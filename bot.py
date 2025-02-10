@@ -124,9 +124,9 @@ def fetch_nasdaq_news():
     sources_query = ' OR '.join([f'source:"{source}"' for source in financial_sources])
     
     # Split companies into smaller batches to reduce query complexity
-    batch_size = 5
-    max_retries = 5
-    base_delay = 10  # Initial delay in seconds
+    batch_size = 3  # Reduced batch size
+    max_retries = 7  # Increased max retries
+    base_delay = 30  # Increased initial delay
     
     for i in range(0, len(TRACKED_COMPANIES), batch_size):
         company_batch = TRACKED_COMPANIES[i:i + batch_size]
@@ -143,7 +143,7 @@ def fetch_nasdaq_news():
         while retries < max_retries:
             try:
                 # Use session with retry strategy
-                response = session.get(url, params=params, timeout=30)
+                response = session.get(url, params=params, timeout=45)  # Increased timeout
                 
                 if response.status_code == 200:
                     newsapi_articles = response.json().get("articles", [])
@@ -163,28 +163,28 @@ def fetch_nasdaq_news():
                     break  # Success, move to next batch
                     
                 elif response.status_code == 429:
-                    retry_after = int(response.headers.get('Retry-After', base_delay * (2 ** retries)))
+                    retry_after = int(response.headers.get('Retry-After', base_delay * (3 ** retries)))  # More aggressive backoff
                     print(f"NewsAPI rate limit reached, waiting {retry_after} seconds...")
                     time.sleep(retry_after)
                 else:
                     print(f"Error fetching news from NewsAPI: {response.text}")
-                    time.sleep(base_delay * (2 ** retries))
+                    time.sleep(base_delay * (3 ** retries))  # More aggressive backoff
                     
             except requests.exceptions.RequestException as e:
                 print(f"Network error in NewsAPI request: {str(e)}")
-                time.sleep(base_delay * (2 ** retries))
+                time.sleep(base_delay * (3 ** retries))  # More aggressive backoff
                 
             except Exception as e:
                 print(f"Unexpected error in NewsAPI request: {str(e)}")
-                time.sleep(base_delay * (2 ** retries))
+                time.sleep(base_delay * (3 ** retries))  # More aggressive backoff
                 
             retries += 1
             if retries == max_retries:
                 print(f"Failed to fetch news for batch after {max_retries} attempts")
         
-        # Add delay between batches to avoid rate limits
+        # Add longer delay between batches to avoid rate limits
         if i + batch_size < len(TRACKED_COMPANIES):
-            time.sleep(2)
+            time.sleep(5)  # Increased delay between batches
     
     # Always fetch from Yahoo Finance as backup/additional source
     yahoo_articles = fetch_yahoo_finance_news()
