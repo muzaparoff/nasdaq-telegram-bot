@@ -146,9 +146,9 @@ def fetch_nasdaq_news():
     sources_query = ' OR '.join([f'source:"{source}"' for source in financial_sources])
     
     # More conservative batch size and retry settings
-    batch_size = 2  # Reduced batch size to minimize rate limiting
+    batch_size = 1  # Reduced to 1 company per request to minimize rate limiting
     max_retries = 5
-    base_delay = 60  # Increased base delay between requests
+    base_delay = 120  # Increased base delay between requests to 120 seconds
     
     # Additional market-related keywords for better news coverage
     market_keywords = [
@@ -165,14 +165,14 @@ def fetch_nasdaq_news():
             "q": f"({company_query}) AND ({market_query}) AND ({sources_query})",
             "sortBy": "publishedAt",
             "language": "en",
-            "pageSize": 100,  # Increased for better coverage
+            "pageSize": 50,  # Reduced for better rate limit management
             "apiKey": NEWSAPI_KEY
         }
         
         retries = 0
         while retries < max_retries:
             try:
-                response = session.get(url, params=params, timeout=45)
+                response = session.get(url, params=params, timeout=60)
                 
                 if response.status_code == 200:
                     newsapi_articles = response.json().get("articles", [])
@@ -194,9 +194,9 @@ def fetch_nasdaq_news():
                     break
                     
                 elif response.status_code == 429:
-                    retry_after = int(response.headers.get('Retry-After', base_delay * (2 ** retries)))
+                    retry_after = int(response.headers.get('Retry-After', base_delay))
                     logger.warning(f"NewsAPI rate limit reached, waiting {retry_after} seconds...")
-                    time.sleep(retry_after + (base_delay * retries))  # Add additional backoff
+                    time.sleep(retry_after + (base_delay * retries))  # Add exponential backoff
                 else:
                     logger.error(f"Error fetching news from NewsAPI: {response.text}")
                     time.sleep(base_delay * (2 ** retries))
@@ -210,12 +210,11 @@ def fetch_nasdaq_news():
             retries += 1
             if retries == max_retries:
                 logger.error(f"Failed to fetch news for batch after {max_retries} attempts")
-                # Add longer cooldown period after max retries
-                time.sleep(base_delay * 2)
+                time.sleep(base_delay * 3)  # Longer cooldown after max retries
         
         if i + batch_size < len(TRACKED_COMPANIES):
             # Increase delay between batches to avoid rate limits
-            time.sleep(15)
+            time.sleep(base_delay)
     
     articles.sort(key=lambda x: x.get('publishedAt', ''), reverse=True)
     return articles[:50]
