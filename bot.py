@@ -1,11 +1,20 @@
 import os
 import time
+import logging
 import requests
 import yfinance as yf
 from telegram import Bot
 from googletrans import Translator
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 # Environment variables for configuration
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -64,28 +73,27 @@ session.mount('http://', http_adapter)
 session.mount('https://', http_adapter)
 
 def fetch_yahoo_finance_news():
-    """
-    Fetches news and stock data from Yahoo Finance for tracked companies.
-    Implements retry logic and better error handling.
-    """
+    logger.info("Starting to fetch news from Yahoo Finance")
     articles = []
-    retry_delay = 2  # Reduced initial retry delay
+    retry_delay = 2
     max_retries = 3
     
     for symbol in TRACKED_COMPANIES:
+        logger.info(f"Fetching news for {symbol}")
         retries = 0
         while retries < max_retries:
             try:
-                # Get stock info with timeout
                 stock = yf.Ticker(symbol)
                 news = stock.news
-                if news and isinstance(news, list):  # Validate news is a list
+                if news and isinstance(news, list):
                     for item in news:
-                        if not isinstance(item, dict):  # Validate each news item is a dictionary
+                        if not isinstance(item, dict):
+                            logger.warning(f"Invalid news item format for {symbol}")
                             continue
                             
                         summary = item.get("summary", "")
                         if not summary:
+                            logger.debug(f"Empty summary for news item from {symbol}")
                             continue
                             
                         article = {
@@ -98,18 +106,22 @@ def fetch_yahoo_finance_news():
                         
                         if article["title"] and (article["description"] or article["content"]):
                             articles.append(article)
-                    break  # Success, exit retry loop
+                            logger.debug(f"Added article: {article['title']}")
+                    break
                 else:
                     raise ValueError("Invalid news data format")
                 
             except Exception as e:
                 retries += 1
+                logger.error(f"Error fetching Yahoo Finance data for {symbol}: {str(e)}")
                 if retries < max_retries:
-                    print(f"Attempt {retries}/{max_retries} failed for {symbol}. Retrying in {retry_delay} seconds...")
+                    logger.info(f"Attempt {retries}/{max_retries} failed for {symbol}. Retrying in {retry_delay} seconds...")
                     time.sleep(retry_delay)
-                    retry_delay = min(retry_delay * 2, 30)  # Cap maximum delay at 30 seconds
+                    retry_delay = min(retry_delay * 2, 30)
                 else:
-                    print(f"Failed to fetch Yahoo Finance data for {symbol} after {max_retries} attempts: {str(e)}")
+                    logger.error(f"Failed to fetch Yahoo Finance data for {symbol} after {max_retries} attempts")
+    
+    logger.info(f"Completed Yahoo Finance fetch with {len(articles)} articles")
     return articles
 
 def fetch_nasdaq_news():
@@ -325,42 +337,41 @@ def translate_to_russian(text):
         return None
 
 def send_news():
-    import time
+    logger.info("Starting news sending process")
     articles = fetch_nasdaq_news()
     if not articles:
-        print("No articles fetched.")
+        logger.warning("No articles fetched.")
         return
 
     sent_count = 0
     for i, article in enumerate(articles):
         try:
-            # Format the news article
+            logger.info(f"Processing article {i+1} of {len(articles)}")
             message = format_news(article)
             if not message:
-                print(f"Skipping article {i+1}: Could not format message")
+                logger.warning(f"Skipping article {i+1}: Could not format message")
                 continue
 
-            # Translate to Russian
+            logger.info("Translating message to Russian")
             message_ru = translate_to_russian(message)
             if not message_ru:
-                print(f"Skipping article {i+1}: Translation failed")
+                logger.warning(f"Skipping article {i+1}: Translation failed")
                 continue
 
-            # Send message
+            logger.info(f"Sending message to chat {TELEGRAM_CHAT_ID}")
             bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message_ru)
             sent_count += 1
-            print(f"Sent message {sent_count} successfully")
+            logger.info(f"Successfully sent message {sent_count}")
 
-            # Sleep between messages
             if i < len(articles) - 1:
-                print("Waiting 30 seconds before sending next article...")
+                logger.info("Waiting 30 seconds before sending next article...")
                 time.sleep(30)
 
         except Exception as e:
-            print(f"Error processing article {i+1}: {str(e)}")
+            logger.error(f"Error processing article {i+1}: {str(e)}")
             continue
 
-    print(f"Finished sending news. Successfully sent {sent_count} articles.")
+    logger.info(f"Finished sending news. Successfully sent {sent_count} articles.")
 
 if __name__ == "__main__":
     send_news()
