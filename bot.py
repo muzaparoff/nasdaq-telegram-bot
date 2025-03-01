@@ -187,7 +187,9 @@ def fetch_nasdaq_news():
                                 "title": title,
                                 "description": description,
                                 "content": content,
-                                "publishedAt": article.get("publishedAt", "")
+                                "publishedAt": article.get("publishedAt", ""),
+                                "urlToImage": article.get("urlToImage", ""),
+                                "url": article.get("url", "")
                             })
                     break
                     
@@ -299,15 +301,22 @@ def format_news(article):
                 break
         
         # Format the message with source name and headline (without markdown)
-        message = f"{source_name}: {title}\n\n"
-        # Only proceed if we have between 3 and 15 sentences (reduced from 5)
-        if len(formatted_sentences) < 3:
-            print("Not enough unique sentences (minimum 3 required)")
-            return None
+        message = ""
+        
+        # Add image if available
+        if article.get("urlToImage"):
+            message += f"{article['urlToImage']}\n\n"
             
+        message += f"{source_name}: {title}\n\n"
+        
         # Add all sentences with line breaks between them (up to 15)
         for i, sentence in enumerate(formatted_sentences[:15]):
             message += f"– {sentence}\n"
+            
+        # Add source URL if available
+        if article.get("url"):
+            message += f"\nSource: {article['url']}"
+            
         # Add channel name with @ symbol after a blank line
         message += "\n\n@nasdaq_news"
         
