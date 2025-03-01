@@ -69,7 +69,7 @@ def fetch_yahoo_finance_news():
     Implements retry logic and better error handling.
     """
     articles = []
-    retry_delay = 5  # Initial retry delay in seconds
+    retry_delay = 2  # Reduced initial retry delay
     max_retries = 3
     
     for symbol in TRACKED_COMPANIES:
@@ -79,8 +79,11 @@ def fetch_yahoo_finance_news():
                 # Get stock info with timeout
                 stock = yf.Ticker(symbol)
                 news = stock.news
-                if news:
+                if news and isinstance(news, list):  # Validate news is a list
                     for item in news:
+                        if not isinstance(item, dict):  # Validate each news item is a dictionary
+                            continue
+                            
                         summary = item.get("summary", "")
                         if not summary:
                             continue
@@ -95,14 +98,16 @@ def fetch_yahoo_finance_news():
                         
                         if article["title"] and (article["description"] or article["content"]):
                             articles.append(article)
-                break  # Success, exit retry loop
+                    break  # Success, exit retry loop
+                else:
+                    raise ValueError("Invalid news data format")
                 
             except Exception as e:
                 retries += 1
                 if retries < max_retries:
                     print(f"Attempt {retries}/{max_retries} failed for {symbol}. Retrying in {retry_delay} seconds...")
                     time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
+                    retry_delay = min(retry_delay * 2, 30)  # Cap maximum delay at 30 seconds
                 else:
                     print(f"Failed to fetch Yahoo Finance data for {symbol} after {max_retries} attempts: {str(e)}")
     return articles
@@ -110,30 +115,30 @@ def fetch_yahoo_finance_news():
 def fetch_nasdaq_news():
     """
     Fetches recent news for S&P 500 companies using NewsAPI.org and Yahoo Finance.
-    Implements enhanced rate limiting and retry logic.
+    Implements enhanced rate limiting and retry logic with reduced query complexity.
     """
     articles = []
     url = "https://newsapi.org/v2/everything"
     
-    # Define trusted financial news sources
+    # Define core financial news sources to reduce query length
     financial_sources = [
-        'Bloomberg', 'Reuters', 'CNBC', 'Financial Times', 'Wall Street Journal',
-        'MarketWatch', 'Seeking Alpha', 'The Motley Fool', 'Yahoo Finance', 'Investing.com',
-        'Barron\'s', 'Business Insider', 'Forbes', 'TheStreet', 'Benzinga'
+        'Bloomberg', 'Reuters', 'CNBC', 'WSJ', 'MarketWatch',
+        'Yahoo Finance', 'Forbes', 'Business Insider'
     ]
     sources_query = ' OR '.join([f'source:"{source}"' for source in financial_sources])
     
-    # Split companies into smaller batches to reduce query complexity
-    batch_size = 3  # Reduced batch size
-    max_retries = 7  # Increased max retries
-    base_delay = 30  # Increased initial delay
+    # Reduce batch size and simplify query terms
+    batch_size = 2  # Reduced from 3 to 2
+    max_retries = 7
+    base_delay = 30
     
     for i in range(0, len(TRACKED_COMPANIES), batch_size):
         company_batch = TRACKED_COMPANIES[i:i + batch_size]
-        company_query = ' OR '.join([f'({company} OR "{company} stock")' for company in company_batch])
+        # Simplify company query to reduce length
+        company_query = ' OR '.join(company_batch)
         
         params = {
-            "q": f"({company_query}) AND (stock OR shares OR market OR trading OR investor OR earnings OR revenue OR dividend OR NYSE OR NASDAQ) AND ({sources_query})",
+            "q": f"({company_query}) AND (stock OR market OR earnings) AND ({sources_query})",
             "sortBy": "publishedAt",
             "language": "en",
             "apiKey": NEWSAPI_KEY
@@ -142,8 +147,7 @@ def fetch_nasdaq_news():
         retries = 0
         while retries < max_retries:
             try:
-                # Use session with retry strategy
-                response = session.get(url, params=params, timeout=45)  # Increased timeout
+                response = session.get(url, params=params, timeout=45)
                 
                 if response.status_code == 200:
                     newsapi_articles = response.json().get("articles", [])
@@ -160,39 +164,37 @@ def fetch_nasdaq_news():
                                 "content": content,
                                 "publishedAt": article.get("publishedAt", "")
                             })
-                    break  # Success, move to next batch
+                    break
                     
                 elif response.status_code == 429:
-                    retry_after = int(response.headers.get('Retry-After', base_delay * (3 ** retries)))  # More aggressive backoff
+                    retry_after = int(response.headers.get('Retry-After', base_delay * (2 ** retries)))
                     print(f"NewsAPI rate limit reached, waiting {retry_after} seconds...")
                     time.sleep(retry_after)
                 else:
                     print(f"Error fetching news from NewsAPI: {response.text}")
-                    time.sleep(base_delay * (3 ** retries))  # More aggressive backoff
+                    time.sleep(base_delay * (2 ** retries))
                     
-            except requests.exceptions.RequestException as e:
-                print(f"Network error in NewsAPI request: {str(e)}")
-                time.sleep(base_delay * (3 ** retries))  # More aggressive backoff
-                
             except Exception as e:
-                print(f"Unexpected error in NewsAPI request: {str(e)}")
-                time.sleep(base_delay * (3 ** retries))  # More aggressive backoff
+                print(f"Error in NewsAPI request: {str(e)}")
+                time.sleep(base_delay * (2 ** retries))
                 
             retries += 1
             if retries == max_retries:
                 print(f"Failed to fetch news for batch after {max_retries} attempts")
         
-        # Add longer delay between batches to avoid rate limits
         if i + batch_size < len(TRACKED_COMPANIES):
-            time.sleep(5)  # Increased delay between batches
+            time.sleep(5)
     
-    # Always fetch from Yahoo Finance as backup/additional source
-    yahoo_articles = fetch_yahoo_finance_news()
-    articles.extend(yahoo_articles)
+    # Fetch from Yahoo Finance with improved error handling
+    try:
+        yahoo_articles = fetch_yahoo_finance_news()
+        if yahoo_articles:
+            articles.extend(yahoo_articles)
+    except Exception as e:
+        print(f"Error fetching Yahoo Finance news: {str(e)}")
     
-    # Sort all articles by published date and return most recent
     articles.sort(key=lambda x: x.get('publishedAt', ''), reverse=True)
-    return articles[:50]  # Limit to 50 most recent articles
+    return articles[:50]
 
 def format_news(article):
     """
