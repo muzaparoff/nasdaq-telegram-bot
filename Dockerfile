@@ -14,5 +14,8 @@ COPY . /app/
 # Download required NLTK data
 RUN python -m nltk.downloader punkt punkt_tab
 
+# Set Python to run in unbuffered mode to ensure logs are output immediately
+ENV PYTHONUNBUFFERED=1
+
 # Command to run the bot
-CMD ["python", "bot.py"]
+CMD ["python", "-u", "bot.py"]
