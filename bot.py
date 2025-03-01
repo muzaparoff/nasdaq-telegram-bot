@@ -145,10 +145,10 @@ def fetch_nasdaq_news():
     ]
     sources_query = ' OR '.join([f'source:"{source}"' for source in financial_sources])
     
-    # Optimize batch size and query terms
-    batch_size = 3  # Increased for better coverage
-    max_retries = 7
-    base_delay = 30
+    # More conservative batch size and retry settings
+    batch_size = 2  # Reduced batch size to minimize rate limiting
+    max_retries = 5
+    base_delay = 60  # Increased base delay between requests
     
     # Additional market-related keywords for better news coverage
     market_keywords = [
@@ -196,10 +196,12 @@ def fetch_nasdaq_news():
                 elif response.status_code == 429:
                     retry_after = int(response.headers.get('Retry-After', base_delay * (2 ** retries)))
                     logger.warning(f"NewsAPI rate limit reached, waiting {retry_after} seconds...")
-                    time.sleep(retry_after)
+                    time.sleep(retry_after + (base_delay * retries))  # Add additional backoff
                 else:
                     logger.error(f"Error fetching news from NewsAPI: {response.text}")
                     time.sleep(base_delay * (2 ** retries))
+                    if response.status_code >= 500:  # Server errors need longer cooldown
+                        time.sleep(base_delay * 3)
                     
             except Exception as e:
                 logger.error(f"Error in NewsAPI request: {str(e)}")
@@ -208,9 +210,12 @@ def fetch_nasdaq_news():
             retries += 1
             if retries == max_retries:
                 logger.error(f"Failed to fetch news for batch after {max_retries} attempts")
+                # Add longer cooldown period after max retries
+                time.sleep(base_delay * 2)
         
         if i + batch_size < len(TRACKED_COMPANIES):
-            time.sleep(5)
+            # Increase delay between batches to avoid rate limits
+            time.sleep(15)
     
     articles.sort(key=lambda x: x.get('publishedAt', ''), reverse=True)
     return articles[:50]
