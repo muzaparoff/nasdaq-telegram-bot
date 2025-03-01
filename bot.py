@@ -8,13 +8,17 @@ from googletrans import Translator
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# Configure logging
+# Configure logging with stream handler for better Docker container visibility
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
+logger.propagate = True
 
 # Environment variables for configuration
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
