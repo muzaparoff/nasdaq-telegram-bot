@@ -130,33 +130,42 @@ def fetch_yahoo_finance_news():
 
 def fetch_nasdaq_news():
     """
-    Fetches recent news for S&P 500 companies using NewsAPI.org and Yahoo Finance.
-    Implements enhanced rate limiting and retry logic with reduced query complexity.
+    Fetches recent news for S&P 500 companies using NewsAPI.org with enhanced sources.
+    Implements optimized rate limiting and retry logic with improved query complexity.
     """
     articles = []
     url = "https://newsapi.org/v2/everything"
     
-    # Define core financial news sources to reduce query length
+    # Enhanced list of financial news sources
     financial_sources = [
         'Bloomberg', 'Reuters', 'CNBC', 'WSJ', 'MarketWatch',
-        'Yahoo Finance', 'Forbes', 'Business Insider'
+        'Financial Times', 'Forbes', 'Business Insider', 'The Economist',
+        'Seeking Alpha', 'Investing.com', 'TheStreet', 'Barron\'s',
+        'Motley Fool', 'Zacks', 'Benzinga'
     ]
     sources_query = ' OR '.join([f'source:"{source}"' for source in financial_sources])
     
-    # Reduce batch size and simplify query terms
-    batch_size = 2  # Reduced from 3 to 2
+    # Optimize batch size and query terms
+    batch_size = 3  # Increased for better coverage
     max_retries = 7
     base_delay = 30
     
+    # Additional market-related keywords for better news coverage
+    market_keywords = [
+        'stock', 'market', 'earnings', 'trading', 'investment',
+        'shares', 'price', 'financial', 'company', 'investor'
+    ]
+    market_query = ' OR '.join(market_keywords)
+    
     for i in range(0, len(TRACKED_COMPANIES), batch_size):
         company_batch = TRACKED_COMPANIES[i:i + batch_size]
-        # Simplify company query to reduce length
         company_query = ' OR '.join(company_batch)
         
         params = {
-            "q": f"({company_query}) AND (stock OR market OR earnings) AND ({sources_query})",
+            "q": f"({company_query}) AND ({market_query}) AND ({sources_query})",
             "sortBy": "publishedAt",
             "language": "en",
+            "pageSize": 100,  # Increased for better coverage
             "apiKey": NEWSAPI_KEY
         }
         
@@ -184,30 +193,22 @@ def fetch_nasdaq_news():
                     
                 elif response.status_code == 429:
                     retry_after = int(response.headers.get('Retry-After', base_delay * (2 ** retries)))
-                    print(f"NewsAPI rate limit reached, waiting {retry_after} seconds...")
+                    logger.warning(f"NewsAPI rate limit reached, waiting {retry_after} seconds...")
                     time.sleep(retry_after)
                 else:
-                    print(f"Error fetching news from NewsAPI: {response.text}")
+                    logger.error(f"Error fetching news from NewsAPI: {response.text}")
                     time.sleep(base_delay * (2 ** retries))
                     
             except Exception as e:
-                print(f"Error in NewsAPI request: {str(e)}")
+                logger.error(f"Error in NewsAPI request: {str(e)}")
                 time.sleep(base_delay * (2 ** retries))
                 
             retries += 1
             if retries == max_retries:
-                print(f"Failed to fetch news for batch after {max_retries} attempts")
+                logger.error(f"Failed to fetch news for batch after {max_retries} attempts")
         
         if i + batch_size < len(TRACKED_COMPANIES):
             time.sleep(5)
-    
-    # Fetch from Yahoo Finance with improved error handling
-    try:
-        yahoo_articles = fetch_yahoo_finance_news()
-        if yahoo_articles:
-            articles.extend(yahoo_articles)
-    except Exception as e:
-        print(f"Error fetching Yahoo Finance news: {str(e)}")
     
     articles.sort(key=lambda x: x.get('publishedAt', ''), reverse=True)
     return articles[:50]
