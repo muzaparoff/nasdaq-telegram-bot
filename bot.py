@@ -356,15 +356,35 @@ def translate_to_russian(text):
 
 def send_news():
     logger.info("Starting news sending process")
-    articles = fetch_nasdaq_news()
-    if not articles:
-        logger.warning("No articles fetched.")
-        return
+    
+    # Fetch from both sources
+    nasdaq_articles = fetch_nasdaq_news()
+    yahoo_articles = fetch_yahoo_finance_news()
+    
+    # Combine and deduplicate articles
+    all_articles = []
+    seen_titles = set()
+    
+    for article in nasdaq_articles + yahoo_articles:
+        title = article.get('title', '').lower()
+        if title and title not in seen_titles:
+            seen_titles.add(title)
+            all_articles.append(article)
+    
+    # Sort by relevance and recency
+    all_articles.sort(key=lambda x: (
+        x.get('publishedAt', ''),
+        len(x.get('content', '')),
+        len(x.get('description', ''))
+    ), reverse=True)
+    
+    # Process only the most relevant articles
+    processed_articles = all_articles[:15]  # Limit to top 15 articles
 
     sent_count = 0
-    for i, article in enumerate(articles):
+    for i, article in enumerate(processed_articles):
         try:
-            logger.info(f"Processing article {i+1} of {len(articles)}")
+            logger.info(f"Processing article {i+1} of {len(processed_articles)}")
             message = format_news(article)
             if not message:
                 logger.warning(f"Skipping article {i+1}: Could not format message")
@@ -381,7 +401,7 @@ def send_news():
             sent_count += 1
             logger.info(f"Successfully sent message {sent_count}")
 
-            if i < len(articles) - 1:
+            if i < len(processed_articles) - 1:
                 logger.info("Waiting 30 seconds before sending next article...")
                 time.sleep(30)
 
